@@ -3,6 +3,15 @@ import numpy as np
 import mediapipe as mp
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+import torch
+from model import SignLanguageTransformer
+
+# Load the trained model
+model = SignLanguageTransformer(num_classes=30)
+model.load_state_dict(torch.load("sl_transformer_30.pth", map_location=torch.device('cpu')))
+model.eval()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 
 # Initialize MediaPipe models
 mp_hands = mp.solutions.hands.Hands()
@@ -27,10 +36,20 @@ filtered_face = [0, 4, 7, 8, 10, 13, 14, 17, 21, 33, 37, 39, 40, 46, 52, 53, 54,
 HAND_NUM = len(filtered_hand)
 POSE_NUM = len(filtered_pose)
 FACE_NUM = len(filtered_face)
-
+TOTAL = HAND_NUM*2+POSE_NUM+FACE_NUM
+print(f"Total number of landmarks: Hands: {HAND_NUM}, Pose: {POSE_NUM}, Face: {FACE_NUM}, Total: {TOTAL}")
 # Buffer to store past frames
-FRAME_WINDOW = 80
+FRAME_WINDOW = 10
 buffer = deque(maxlen=FRAME_WINDOW)
+
+label_map = {
+    0: 'apple', 1: 'backpack', 2: 'capture', 3: 'circuswheel', 4: 'count',
+    5: 'downhill', 6: 'easy to do', 7: 'gym', 8: 'hug', 9: 'impossible',
+    10: 'influence', 11: 'joke', 12: 'juice', 13: 'nice', 14: 'nose',
+    15: 'park', 16: 'peacock', 17: 'ponder', 18: 'powder', 19: 'pull convince',
+    20: 'rose', 21: 'scold', 22: 'smooth', 23: 'soccer', 24: 'social',
+    25: 'society', 26: 'stink', 27: 'tube', 28: 'we', 29: 'weave'
+}
 
 def get_frame_landmarks(frame):
     """Extract hand, pose, and face landmarks from a frame."""
@@ -75,6 +94,34 @@ def draw_landmarks(frame, results_hands, results_pose, results_face):
             mp_drawing.draw_landmarks(frame, face_landmarks, None, 
                                       mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=1, circle_radius=1))
 
+def predict_sign(buffer):
+    """Pass collected frames through the model for prediction."""
+    if len(buffer) < FRAME_WINDOW:
+        return "Waiting..."
+    
+    input_sequence = np.array(buffer)  # Convert buffer to NumPy array
+    input_tensor = torch.tensor(input_sequence, dtype=torch.float32).to(device)
+    num_frames = input_tensor.shape[0]
+
+    expected_shape = (1, num_frames, 180, 3)  # Correct expected shape
+    expected_total_size = np.prod(expected_shape)  # 1 * T * 180 * 3
+
+    if input_tensor.numel() != expected_total_size:
+        return f"Error: Shape Mismatch {expected_total_size} vs {input_tensor.numel()}"
+
+    # Correct reshape
+    input_tensor = input_tensor.view(expected_shape)
+
+    with torch.no_grad():
+        lengths = torch.tensor([num_frames], dtype=torch.long).to(device)
+        prediction = model(input_tensor, lengths)  # Pass through model
+        predicted_class = torch.argmax(prediction, dim=1).item()
+
+    predicted_label = label_map.get(predicted_class, "Unknown")
+    return predicted_label
+
+frame_num = 0
+
 # OpenCV Webcam Capture
 cap = cv2.VideoCapture(0)
 
@@ -96,12 +143,18 @@ while cap.isOpened():
     # Append to buffer
     buffer.append(landmarks)
 
+    if len(buffer) > FRAME_WINDOW:
+        buffer.pop(0)  # Remove the oldest frame
+
+    
     # Draw landmarks on frame
     # draw_landmarks(frame, results_hands, results_pose, results_face)
 
+    predicted_label = predict_sign(buffer)
+
     # Display buffer count
-    cv2.putText(frame, f"Frames: {len(buffer)} / {FRAME_WINDOW}", 
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, f"Prediction: {predicted_label}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
 
     # Show video feed
     cv2.imshow("Live Landmark Extraction", frame)

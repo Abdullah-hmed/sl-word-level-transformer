@@ -3,6 +3,7 @@ import numpy as np
 import mediapipe as mp
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+import torch.nn.functional as F
 import torch
 from model import SignLanguageTransformer
 
@@ -97,7 +98,7 @@ def draw_landmarks(frame, results_hands, results_pose, results_face):
 def predict_sign(buffer):
     """Pass collected frames through the model for prediction."""
     if len(buffer) < FRAME_WINDOW:
-        return "Waiting..."
+        return "Waiting...", 0.0  # Return 0 confidence when waiting
     
     input_sequence = np.array(buffer)  # Convert buffer to NumPy array
     input_tensor = torch.tensor(input_sequence, dtype=torch.float32).to(device)
@@ -107,7 +108,7 @@ def predict_sign(buffer):
     expected_total_size = np.prod(expected_shape)  # 1 * T * 180 * 3
 
     if input_tensor.numel() != expected_total_size:
-        return f"Error: Shape Mismatch {expected_total_size} vs {input_tensor.numel()}"
+        return f"Error: Shape Mismatch {expected_total_size} vs {input_tensor.numel()}", 0.0
 
     # Correct reshape
     input_tensor = input_tensor.view(expected_shape)
@@ -115,10 +116,11 @@ def predict_sign(buffer):
     with torch.no_grad():
         lengths = torch.tensor([num_frames], dtype=torch.long).to(device)
         prediction = model(input_tensor, lengths)  # Pass through model
-        predicted_class = torch.argmax(prediction, dim=1).item()
+        probabilities = F.softmax(prediction, dim=1)  # Apply softmax
+        confidence, predicted_class = torch.max(probabilities, dim=1)  # Get confidence & class
 
-    predicted_label = label_map.get(predicted_class, "Unknown")
-    return predicted_label
+    predicted_label = label_map.get(predicted_class.item(), "Unknown")
+    return predicted_label, confidence.item()
 
 frame_num = 0
 
@@ -150,11 +152,11 @@ while cap.isOpened():
     # Draw landmarks on frame
     # draw_landmarks(frame, results_hands, results_pose, results_face)
 
-    predicted_label = predict_sign(buffer)
+    predicted_label, confidence = predict_sign(buffer)
 
     # Display buffer count
-    cv2.putText(frame, f"Prediction: {predicted_label}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
+    cv2.putText(frame, f"Prediction: {predicted_label} ({confidence:.2f})", (10, 50), 
+            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     # Show video feed
     cv2.imshow("Live Landmark Extraction", frame)

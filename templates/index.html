@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignLingo - Webcam Stream</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        #video {
+            width: 100%;
+            max-width: 640px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            display: block;
+            margin: 20px auto;
+        }
+        #prediction-box {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        #pred {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        #conf {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status {
+            text-align: center;
+            margin-top: 10px;
+            font-style: italic;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <h1>SignLingo - Webcam Stream</h1>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display: none;"></canvas>
+    
+    <div id="prediction-box">
+        <p><strong>Prediction:</strong> <span id="pred">Waiting...</span></p>
+        <p><strong>Confidence:</strong> <span id="conf">0</span>%</p>
+    </div>
+    
+    <p class="status" id="status">Connecting...</p>
+
+    <script>
+        // Connect to the Socket.IO server
+        const socket = io();
+        const status = document.getElementById("status");
+        const predElement = document.getElementById("pred");
+        const confElement = document.getElementById("conf");
+        
+        // Handle Socket.IO events
+        socket.on('connect', () => {
+            status.textContent = "Connected!";
+            console.log("Connected to Socket.IO server");
+            startCamera();
+        });
+        
+        socket.on('disconnect', () => {
+            status.textContent = "Disconnected. Trying to reconnect...";
+            console.log("Disconnected from Socket.IO server");
+        });
+        
+        socket.on('prediction', (data) => {
+            console.log("Received prediction:", data);
+            predElement.textContent = data.label;
+            confElement.textContent = data.confidence;
+        });
+
+        async function startCamera() {
+            try {
+                const video = document.getElementById("video");
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: "user"
+                    } 
+                });
+                
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    sendFrames(); // Start sending frames once video is ready
+                    status.textContent = "Streaming...";
+                };
+            } catch (err) {
+                console.error("Error accessing webcam:", err);
+                status.textContent = "Error accessing webcam: " + err.message;
+            }
+        }
+
+        function sendFrames() {
+            const video = document.getElementById("video");
+            const canvas = document.getElementById("canvas");
+            const ctx = canvas.getContext("2d");
+            
+            // Set canvas size
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Send frame function
+            function captureAndSend() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    // Draw video frame to canvas
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    // Convert to base64
+                    const imageData = canvas.toDataURL('image/jpeg', 0.7);
+                    const base64Data = imageData.split(',')[1];
+                    
+                    // Send to server if connected
+                    if (socket.connected) {
+                        socket.emit('frame', { image: base64Data });
+                    }
+                }
+                
+                // Schedule next frame
+                setTimeout(captureAndSend, 100); // 10 FPS
+            }
+            
+            // Start the capture loop
+            captureAndSend();
+        }
+    </script>
+</body>
+</html>

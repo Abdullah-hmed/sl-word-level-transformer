@@ -4,11 +4,40 @@ from model import SignLanguageTransformer  # Your custom model
 import torch.nn.functional as F
 import mediapipe as mp
 import numpy as np
+import os
+import gdown
 
+def model_available():
+    models_dir = 'models'
+    model_file = 'sl_transformer_30.pth'
+    drive_link = 'https://drive.google.com/uc?export=download&id=1KoLOI8NgHjIkmq1hUvmIOe8qSV3RnDvk'
+
+    # Ensure the models directory exists
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+
+    # Check if the model file exists
+    model_path = os.path.join(models_dir, model_file)
+    if os.path.exists(model_path):
+        print("Model present, continue :)")
+        return True
+    else:
+        print("Model not present, downloading...")
+
+        try:
+            gdown.download(drive_link, model_path, quiet=False)
+            print(f"{model_file} downloaded and saved to {models_dir} folder.")
+            return True
+        except Exception as e:
+            print(f"Failed to download {model_file} from Google Drive. Error: {str(e)}")
+            return False
+
+
+model_available()  # Ensure the model is downloaded if not present, then continue
 
 # Load the trained model
 model = SignLanguageTransformer(num_classes=30)
-model.load_state_dict(torch.load("sl_transformer_30.pth", map_location=torch.device('cpu')))
+model.load_state_dict(torch.load("models/sl_transformer_30.pth", map_location=torch.device('cpu')))
 model.eval()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)

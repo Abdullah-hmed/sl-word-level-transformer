@@ -59,9 +59,9 @@ def handle_frame(frame):
             # Emit asynchronously to prevent blocking
             socketio.emit('prediction', {
                 'label': predicted_label,
-                'confidence': round(confidence * 100, 2)
+                'confidence': confidence
             })
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5050, debug=True)
+    socketio.run(app, port=2000, debug=True)
